@@ -1,0 +1,16 @@
+# AIlert config example
+# Usage: ailert -config config.yaml
+
+# Optional: persist pattern store to this path (load on start, save on exit)
+store_path: ".ailert/store.json"
+
+# Optional: when set, non-suppressed patterns are sent as alerts to Alertmanager
+# alertmanager_url: "http://localhost:9093"
+
+sources:
+  - id: app-log
+    type: file
+    path: /var/log/app.log
+  # - id: metrics
+  #   type: prometheus
+  #   url: http://localhost:9090/metrics

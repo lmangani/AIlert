@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build
+        run: go build -o ailert ./cmd/ailert
+
+  alertmanager-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Start Alertmanager
+        run: |
+          printf 'route:\n  receiver: default\nreceivers:\n  - name: default\n' > /tmp/am.yml
+          docker run -d --name am -p 9093:9093 -v /tmp/am.yml:/etc/alertmanager/alertmanager.yml prom/alertmanager:latest --config.file=/etc/alertmanager/alertmanager.yml
+          sleep 5
+
+      - name: Run Alertmanager smoke test
+        env:
+          ALERTMANAGER_URL: http://localhost:9093
+        run: go test -v -run TestPostAlertsAgainstRealAM ./internal/alertmanager/...

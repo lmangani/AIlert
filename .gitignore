@@ -1,0 +1,15 @@
+# Binaries
+/ailert
+*.exe
+
+# Store and local config
+.ailert/
+*.local.yaml
+
+# Go
+/vendor/
+
+# IDE
+.idea/
+*.swp
+*.swo
