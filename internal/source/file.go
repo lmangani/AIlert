@@ -71,7 +71,7 @@ func (f *FileSource) Stream(ctx context.Context) (<-chan types.Record, <-chan er
 				return
 			default:
 			}
-			// For Phase 1 we only support read-once; tail can be added later with fsnotify
+			// Read-once only; tail (follow) can be added later with fsnotify
 			return
 		}
 	}()

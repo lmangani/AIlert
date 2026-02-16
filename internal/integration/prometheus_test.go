@@ -10,7 +10,8 @@ import (
 	"github.com/ailert/ailert/internal/testutil"
 )
 
-func TestPrometheusSource(t *testing.T) {
+// TestPipeline_PrometheusSource_ScrapeAndPatterns scrapes a /metrics endpoint and runs pattern detection.
+func TestPipeline_PrometheusSource_ScrapeAndPatterns(t *testing.T) {
 	srv := testutil.NewMetricsServer(testutil.SamplePrometheusMetrics())
 	defer srv.Close()
 

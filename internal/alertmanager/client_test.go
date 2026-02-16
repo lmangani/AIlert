@@ -31,8 +31,30 @@ func TestAlertJSON(t *testing.T) {
 	}
 }
 
-// TestPostAlertsAgainstRealAM runs only when ALERTMANAGER_URL is set (CI or local).
-func TestPostAlertsAgainstRealAM(t *testing.T) {
+func TestSilenceJSON(t *testing.T) {
+	s := Silence{
+		Matchers:  []Matcher{{Name: "alertname", Value: "ailert", IsRegex: false}},
+		StartsAt:  time.Now(),
+		EndsAt:    time.Now().Add(time.Hour),
+		CreatedBy: "test",
+		Comment:   "suppress",
+	}
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Silence
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matchers) != 1 || out.Matchers[0].Name != "alertname" {
+		t.Errorf("matchers: %v", out.Matchers)
+	}
+}
+
+// TestAlertmanager_PostAlerts_Integration runs when ALERTMANAGER_URL is set (CI or local).
+// It posts an alert to a real Alertmanager and optionally verifies via GET.
+func TestAlertmanager_PostAlerts_Integration(t *testing.T) {
 	url := os.Getenv("ALERTMANAGER_URL")
 	if url == "" {
 		t.Skip("ALERTMANAGER_URL not set")
@@ -40,13 +62,13 @@ func TestPostAlertsAgainstRealAM(t *testing.T) {
 	client := NewClient(url)
 	a := Alert{
 		Labels: map[string]string{
-			"alertname":    "ailert_smoke",
-			"pattern_hash": "smoke_test_hash",
+			"alertname":    "ailert_integration",
+			"pattern_hash": "integration_test_hash",
 			"level":        "ERROR",
 			"source":       "test",
 		},
 		Annotations: map[string]string{
-			"summary":     "AIlert smoke test",
+			"summary":     "AIlert integration test",
 			"description": "Sample log line",
 		},
 		StartsAt: time.Now(),
@@ -61,7 +83,7 @@ func TestPostAlertsAgainstRealAM(t *testing.T) {
 		return
 	}
 	for _, b := range alerts {
-		if b.Labels["alertname"] == "ailert_smoke" && b.Labels["pattern_hash"] == "smoke_test_hash" {
+		if b.Labels["alertname"] == "ailert_integration" && b.Labels["pattern_hash"] == "integration_test_hash" {
 			t.Log("alert visible in GET")
 			return
 		}

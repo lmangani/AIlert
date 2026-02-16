@@ -56,3 +56,21 @@ func TestStorePersist(t *testing.T) {
 	}
 	os.Remove(path)
 }
+
+func TestStoreListSeen_MultipleLevels(t *testing.T) {
+	st := New("")
+	st.Seen(types.LevelError, "h1", "e1")
+	st.Seen(types.LevelWarn, "h2", "w1")
+	st.Seen(types.LevelInfo, "h3", "i1")
+	list := st.ListSeen()
+	if len(list) != 3 {
+		t.Fatalf("ListSeen len = %d, want 3", len(list))
+	}
+	byLevel := make(map[types.Level]int)
+	for _, p := range list {
+		byLevel[p.Level]++
+	}
+	if byLevel[types.LevelError] != 1 || byLevel[types.LevelWarn] != 1 || byLevel[types.LevelInfo] != 1 {
+		t.Errorf("ListSeen by level: %v", byLevel)
+	}
+}

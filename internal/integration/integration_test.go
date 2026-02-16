@@ -13,8 +13,8 @@ import (
 	"github.com/ailert/ailert/internal/store"
 )
 
-// TestFileSource runs the pipeline with a file source and asserts new/known counts.
-func TestFileSource(t *testing.T) {
+// TestPipeline_FileSource_NewAndKnownCounts runs file → engine → store and asserts new/known pattern counts.
+func TestPipeline_FileSource_NewAndKnownCounts(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "app.log")
 	content := `ERROR connection refused from 10.0.0.1

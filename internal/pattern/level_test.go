@@ -18,6 +18,13 @@ func TestDetectLevel(t *testing.T) {
 		{"something error in message", types.LevelError},
 		{"warning: low disk", types.LevelWarn},
 		{"no level here", types.LevelUnknown},
+		{"exception in thread main", types.LevelError},
+		{"FATAL crash", types.LevelError},
+		{"panic: runtime error", types.LevelError},
+		{"[INFO] request completed", types.LevelInfo},
+		{"  WARN  trailing", types.LevelWarn},
+		{"", types.LevelUnknown},
+		{"200 OK", types.LevelUnknown},
 	}
 	for _, tt := range tests {
 		got := DetectLevel(tt.line)
