@@ -1,6 +1,6 @@
-# PicoClaw integration
+# PicoClaw integration (optional)
 
-Use [PicoClaw](https://github.com/sipeed/picoclaw) as the **agent for all LLM-related tasks**: deciding whether to suppress vs notify, summarizing changes, and applying rules from suggestions. AIlert stays a CLI/library; the agent runs it via the **exec** tool and uses the LLM to interpret output and act.
+**AIlert does not require PicoClaw.** The CLI and all features (run, suppress, detect-changes, suggest-rules, apply-rule, Alertmanager) work on their own. This integration is **optional** for users who want [PicoClaw](https://github.com/sipeed/picoclaw) as the agent for LLM-related tasks: deciding suppress vs notify, summarizing changes, and applying rules from suggestions. The agent runs the `ailert` binary via the **exec** tool and uses the LLM to interpret output and act.
 
 ## How it works
 

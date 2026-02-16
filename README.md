@@ -2,6 +2,8 @@
 
 Log-based alerting that tells you when **something important** shows up: automatic pattern discovery, new vs. known, with optional LLM and one-click suppression. See [docs/PLAN.md](docs/PLAN.md) for architecture and roadmap.
 
+**AIlert works standalone.** All core features (run, suppress, detect-changes, suggest-rules, apply-rule, Alertmanager, metrics) work without any agent or LLM. PicoClaw is an **optional** add-on for users who want an LLM to decide suppress vs notify and to drive periodic or on-request workflows.
+
 ## Features
 
 - **Pattern engine** — Extracts log templates (variable parts stripped), deduplicates by hash, and classifies each line as **new** (first time) or **known**. Level detection (ERROR, WARN, INFO, DEBUG) from content.
@@ -104,9 +106,9 @@ internal/
   types/             Record, Level
 ```
 
-## PicoClaw integration
+## Optional: PicoClaw integration
 
-Use PicoClaw as the **agent for all LLM-related tasks** (suppress vs notify, summarize changes, apply rules). No PicoClaw code changes: the agent runs the `ailert` CLI via the **exec** tool. See **[docs/picoclaw/README.md](docs/picoclaw/README.md)** for setup; copy the workspace skill and optional TOOLS/HEARTBEAT/AGENTS snippets from `docs/picoclaw/`.
+If you want an LLM agent to decide **suppress vs notify**, summarize changes, or run periodic checks, you can use [PicoClaw](https://github.com/sipeed/picoclaw). The agent runs the `ailert` CLI via **exec**; no PicoClaw code changes. Setup and workspace files: **[docs/picoclaw/README.md](docs/picoclaw/README.md)**. This is optional — basic features work regardless.
 
 ## Roadmap
 

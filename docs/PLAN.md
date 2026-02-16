@@ -111,7 +111,7 @@ The agent thus keeps the system adapted to evolving data and reduces manual tuni
 
 **Recommendation:** Start with **Option A** (extend PicoClaw) for speed: implement **data source adapters** and **pattern engine** as a Go library/CLI, then expose them as PicoClaw tools/skills so the agent can “run alerting” and users get one-click suppression and notifications through existing channels. If we outgrow PicoClaw, we can extract the core into a standalone agent (Option B) later.
 
-**Implemented (exec-based):** PicoClaw is used as the agent for all LLM-related tasks **without changing PicoClaw code**. The agent runs the `ailert` CLI via the existing **exec** tool. We ship a workspace add-on in `docs/picoclaw/`: **alerting** skill (`skills/alerting/SKILL.md`), TOOLS snippet, HEARTBEAT and AGENTS examples. The LLM interprets `ailert suggest-rules` output to decide suppress vs notify and applies rules via `ailert apply-rule` / `ailert suppress`. See [docs/picoclaw/README.md](picoclaw/README.md).
+**Implemented (exec-based):** PicoClaw is used as the agent for all LLM-related tasks **without changing PicoClaw code**. The agent runs the `ailert` CLI via the existing **exec** tool. We ship a workspace add-on in `docs/picoclaw/`: **alerting** skill (`skills/alerting/SKILL.md`), TOOLS snippet, HEARTBEAT and AGENTS examples. The LLM interprets `ailert suggest-rules` output to decide suppress vs notify and applies rules via `ailert apply-rule` / `ailert suppress`. See [docs/picoclaw/README.md](picoclaw/README.md). **PicoClaw is optional** — the CLI and all core features work standalone; the integration is for users who want an LLM agent for suppress-vs-notify and periodic/on-request workflows.
 
 ---
 
