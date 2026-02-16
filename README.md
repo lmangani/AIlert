@@ -7,8 +7,8 @@ Log-based alerting that tells you when **something important** shows up: automat
 ## Features
 
 - **Pattern engine** — Extracts log templates (variable parts stripped), deduplicates by hash, and classifies each line as **new** (first time) or **known**. Level detection (ERROR, WARN, INFO, DEBUG) from content.
-- **Data sources** — **File**: read log files line-by-line. **Prometheus**: scrape `/metrics`, each line as a record. **HTTP**: GET a URL, each line as a record.
-- **Pattern store** — In-memory seen patterns and counts; optional JSON persist. Suppression list (pattern hash → don’t alert).
+- **Data sources** — **File**: read log files line-by-line. **Prometheus**: scrape `/metrics`, each line as a record. **HTTP**: GET a URL, each line as a record. **DuckDB**: run a SQL query (e.g. against a `records` table) to stream records. Storage and datasource are separate features; they just share the same DuckDB components when both are used.
+- **Pattern store** — In-memory seen patterns and counts; optional JSON persist, or **DuckDB** for patterns, suppressions, records, and snapshots in one file.
 - **CLI** — Subcommands: `run`, `suppress`, `detect-changes`, `suggest-rules`, `apply-rule`.
 - **Alertmanager** — Emit alerts (POST `/api/v2/alerts`). One-click suppress creates a silence (POST `/api/v2/silences`) so suppressions appear in Grafana/AM UI.
 - **Change detection** — Save snapshots after a run; compare current store to last snapshot (new/gone/count changes).
@@ -42,6 +42,7 @@ go build -o ailert ./cmd/ailert
 
 ```yaml
 store_path: ".ailert/store.json"
+# duckdb_path: ".ailert/ailert.duckdb"   # optional: use DuckDB for store, records, snapshots
 # alertmanager_url: "http://localhost:9093"
 # snapshot_dir: ".ailert/snapshots"
 
@@ -51,6 +52,7 @@ sources:
     path: /var/log/app.log
   # type: prometheus; url: http://localhost:9090/metrics
   # type: http; url: https://example.com/logs.txt
+  # type: duckdb; query: "SELECT * FROM records ORDER BY timestamp"  # optional; uses same DB as duckdb_path if set
 ```
 
 ## Example workflow
@@ -92,19 +94,30 @@ curl -s http://localhost:9093/api/v2/alerts | jq .
 ```
 cmd/ailert/          CLI (run, suppress, detect-changes, suggest-rules, apply-rule)
 internal/
-  alertmanager/      Alertmanager API v2 (alerts, silences)
-  changes/           Change detection and heuristic rule suggestions
-  config/            YAML config
-  engine/            Pattern engine (hash, new/known)
-  metrics/           Optional Prometheus metrics
+  alertmanager/     Alertmanager API v2 (alerts, silences)
+  changes/          Change detection and heuristic rule suggestions
+  config/           YAML config
+  duckdb/            DuckDB backend (store, records, snapshots) and DuckDB source type; same components, independent features
+  engine/           Pattern engine (hash, new/known)
+  metrics/          Optional Prometheus metrics
   integration/       Pipeline tests
-  pattern/           Template extraction, level detection
-  snapshot/          Snapshot save/load for change detection
-  source/            File, Prometheus, HTTP sources
-  store/             Seen patterns and suppression store
-  testutil/          Test helpers (MetricsServer, datasets)
-  types/             Record, Level
+  pattern/          Template extraction, level detection
+  snapshot/         Snapshot save/load (file or DuckDB)
+  source/           File, Prometheus, HTTP, DuckDB sources
+  store/            Seen patterns and suppression store (memory + JSON or DuckDB)
+  testutil/         Test helpers (MetricsServer, datasets)
+  types/            Record, Level
 ```
+
+## DuckDB (optional)
+
+DuckDB is used in two independent ways; they share the same components but are not tied to each other.
+
+1. **Storage** — Set **`duckdb_path`** in config to use DuckDB for state: patterns, suppressions, **records** (append-only log of ingested lines), and snapshots. With storage enabled: **run** appends each record to the `records` table and saves a snapshot in the DB (no `-save-snapshot` dir needed); **detect-changes** and **suggest-rules** use the latest snapshot from the DB (no `snapshot_dir` needed).
+
+2. **Datasource** — Add a source **`type: duckdb`** with an optional **`query`** to stream records from a DuckDB database (e.g. `SELECT * FROM records ORDER BY timestamp`). Often you use the same DB as `duckdb_path`, but the two features are separate.
+
+Build requires CGO (DuckDB embeds a native library). See `config.example.yaml` for examples.
 
 ## Optional: PicoClaw integration
 

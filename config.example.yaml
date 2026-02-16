@@ -1,13 +1,18 @@
 # AIlert config example
 # Usage: ailert run -config config.yaml
 
-# Optional: persist pattern store (load/save on run)
+# Optional: persist pattern store (JSON). Ignored when duckdb_path is set.
 store_path: ".ailert/store.json"
+
+# Optional: use DuckDB for store, records, and snapshots (single file).
+# When set, store_path and snapshot_dir are not used for persistence.
+# Records ingested during run are appended to DuckDB; snapshots stored in DB.
+# duckdb_path: ".ailert/ailert.duckdb"
 
 # Optional: emit alerts and create silences
 # alertmanager_url: "http://localhost:9093"
 
-# Optional: directory for snapshots (used by detect-changes, suggest-rules)
+# Optional: directory for file snapshots (used only when duckdb_path is empty)
 # snapshot_dir: ".ailert/snapshots"
 
 sources:
@@ -20,3 +25,6 @@ sources:
   # - id: log-url
   #   type: http
   #   url: https://example.com/logs.txt
+  # - id: history
+  #   type: duckdb
+  #   query: "SELECT timestamp, level, message, labels, source_id FROM records WHERE timestamp > now() - interval '1 day'"

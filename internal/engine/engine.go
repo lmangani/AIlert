@@ -26,12 +26,12 @@ type levelHash struct {
 // Engine runs the pattern extraction and store lookup.
 type Engine struct {
 	mu       sync.RWMutex
-	store    *store.Store
+	store    store.PatternStore
 	patterns map[levelHash]*pattern.Pattern // (level, hash) -> pattern for WeakEqual within same level
 }
 
 // New returns an engine that uses the given store.
-func New(st *store.Store) *Engine {
+func New(st store.PatternStore) *Engine {
 	return &Engine{
 		store:   st,
 		patterns: make(map[levelHash]*pattern.Pattern),

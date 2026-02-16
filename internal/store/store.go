@@ -9,8 +9,20 @@ import (
 	"github.com/ailert/ailert/internal/types"
 )
 
+// PatternStore is the interface used by the engine for pattern/suppression state.
+// Implementations: in-memory Store (with optional JSON persist) or DuckDB-backed store.
+type PatternStore interface {
+	Seen(level types.Level, hash string, sample string) (isNew bool)
+	GetCount(level types.Level, hash string) int64
+	Suppress(hash string, reason string)
+	IsSuppressed(hash string) bool
+	ListSeen() []PatternInfo
+	Load() error
+	Save() error
+}
+
 // Store holds seen pattern hashes and optional suppression list.
-// Safe for concurrent use.
+// Safe for concurrent use. Implements PatternStore.
 type Store struct {
 	mu          sync.RWMutex
 	seen        map[patternKey]patternStat

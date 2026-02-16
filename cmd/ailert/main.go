@@ -14,6 +14,7 @@ import (
 	"github.com/ailert/ailert/internal/alertmanager"
 	"github.com/ailert/ailert/internal/changes"
 	"github.com/ailert/ailert/internal/config"
+	"github.com/ailert/ailert/internal/duckdb"
 	"github.com/ailert/ailert/internal/engine"
 	"github.com/ailert/ailert/internal/pattern"
 	"github.com/ailert/ailert/internal/snapshot"
@@ -24,6 +25,20 @@ import (
 )
 
 const suppressCountThreshold = 5
+
+// getStore returns a PatternStore and optionally a DuckDB connection. When cfg.DuckDBPath is set,
+// the store is DuckDB-backed and the caller must call db.Close() when done. Otherwise returns (memory store, nil).
+func getStore(cfg *config.Config) (store.PatternStore, *duckdb.DB, error) {
+	if cfg.DuckDBPath != "" {
+		db, err := duckdb.Open(cfg.DuckDBPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("duckdb: %w", err)
+		}
+		return duckdb.NewStore(db), db, nil
+	}
+	st := store.New(cfg.StorePath)
+	return st, nil, nil
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -71,7 +86,7 @@ Use -h with a command for details.
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Config YAML")
-	saveSnapshot := fs.String("save-snapshot", "", "Save snapshot to this dir after run (for detect-changes)")
+	saveSnapshot := fs.String("save-snapshot", "", "Save snapshot to this dir after run (for detect-changes). With duckdb_path, snapshot is stored in DuckDB instead.")
 	metricsAddr := fs.String("metrics-addr", "", "If set, serve Prometheus metrics on this address (e.g. :9090)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -80,7 +95,13 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	st := store.New(cfg.StorePath)
+	st, db, err := getStore(cfg)
+	if err != nil {
+		return err
+	}
+	if db != nil {
+		defer db.Close()
+	}
 	if err := st.Load(); err != nil {
 		return fmt.Errorf("load store: %w", err)
 	}
@@ -98,16 +119,25 @@ func cmdRun(args []string) error {
 		cancel()
 	}()
 
+	var appendRecord func(*types.Record)
+	if db != nil {
+		appendRecord = func(r *types.Record) {
+			if err := db.AppendRecord(r); err != nil {
+				fmt.Fprintf(os.Stderr, "duckdb append record: %v\n", err)
+			}
+		}
+	}
+
 	var wg sync.WaitGroup
 	for _, spec := range cfg.Sources {
-		src := sourceFromSpec(spec)
+		src := sourceFromSpec(spec, db)
 		if src == nil {
 			return fmt.Errorf("unknown source type %q", spec.Type)
 		}
 		wg.Add(1)
 		go func(s source.Source) {
 			defer wg.Done()
-			runSource(ctx, eng, s, amClient)
+			runSource(ctx, eng, s, amClient, appendRecord)
 		}(src)
 	}
 	go func() {
@@ -116,20 +146,24 @@ func cmdRun(args []string) error {
 	}()
 
 	<-ctx.Done()
-	if cfg.StorePath != "" {
-		if err := st.Save(); err != nil {
-			return fmt.Errorf("save store: %w", err)
-		}
+	if err := st.Save(); err != nil {
+		return fmt.Errorf("save store: %w", err)
 	}
 	if *metricsAddr != "" {
 		metrics.Serve(*metricsAddr)
 	}
-	if *saveSnapshot != "" {
-		list := st.ListSeen()
-		ents := make([]snapshot.PatternEnt, len(list))
-		for i, p := range list {
-			ents[i] = snapshot.PatternEnt{Level: p.Level, Hash: p.Hash, Sample: p.Sample, Count: p.Count}
+	list := st.ListSeen()
+	ents := make([]snapshot.PatternEnt, len(list))
+	for i, p := range list {
+		ents[i] = snapshot.PatternEnt{Level: p.Level, Hash: p.Hash, Sample: p.Sample, Count: p.Count}
+	}
+	if db != nil {
+		id, err := db.SaveSnapshot(ents)
+		if err != nil {
+			return fmt.Errorf("save snapshot: %w", err)
 		}
+		fmt.Println("Snapshot saved to DuckDB (id=", id, ")")
+	} else if *saveSnapshot != "" {
 		path := filepath.Join(*saveSnapshot, "snapshot_latest.json")
 		if err := snapshot.Save(path, ents); err != nil {
 			return fmt.Errorf("save snapshot: %w", err)
@@ -140,7 +174,7 @@ func cmdRun(args []string) error {
 	return nil
 }
 
-func sourceFromSpec(spec config.SourceSpec) source.Source {
+func sourceFromSpec(spec config.SourceSpec, db *duckdb.DB) source.Source {
 	switch spec.Type {
 	case "file":
 		return &source.FileSource{Path: spec.Path, SourceID: spec.ID}
@@ -148,12 +182,17 @@ func sourceFromSpec(spec config.SourceSpec) source.Source {
 		return &source.PrometheusSource{URL: spec.URL, SourceID: spec.ID}
 	case "http":
 		return &source.HTTPSource{URL: spec.URL, SourceID: spec.ID}
+	case "duckdb":
+		if db == nil {
+			return nil // duckdb source requires duckdb_path in config
+		}
+		return &source.DuckDBSource{DB: db.SQL(), Query: spec.Query, SourceID: spec.ID}
 	default:
 		return nil
 	}
 }
 
-func runSource(ctx context.Context, eng *engine.Engine, src source.Source, amClient *alertmanager.Client) {
+func runSource(ctx context.Context, eng *engine.Engine, src source.Source, amClient *alertmanager.Client, appendRecord func(*types.Record)) {
 	recCh, errCh := src.Stream(ctx)
 	for {
 		select {
@@ -167,6 +206,9 @@ func runSource(ctx context.Context, eng *engine.Engine, src source.Source, amCli
 		case rec, ok := <-recCh:
 			if !ok {
 				return
+			}
+			if appendRecord != nil {
+				appendRecord(&rec)
 			}
 			res := eng.Process(&rec)
 			metrics.RecordsProcessed.Add(1)
@@ -236,15 +278,19 @@ func cmdSuppress(args []string) error {
 	if err != nil {
 		return err
 	}
-	st := store.New(cfg.StorePath)
+	st, db, err := getStore(cfg)
+	if err != nil {
+		return err
+	}
+	if db != nil {
+		defer db.Close()
+	}
 	if err := st.Load(); err != nil {
 		return err
 	}
 	st.Suppress(h, *reason)
-	if cfg.StorePath != "" {
-		if err := st.Save(); err != nil {
-			return err
-		}
+	if err := st.Save(); err != nil {
+		return err
 	}
 	fmt.Println("Suppressed pattern", h)
 	if *createSilence && cfg.AlertmanagerURL != "" {
@@ -268,7 +314,7 @@ func cmdSuppress(args []string) error {
 func cmdDetectChanges(args []string) error {
 	fs := flag.NewFlagSet("detect-changes", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Config YAML")
-	snapshotDir := fs.String("snapshot-dir", "", "Directory with snapshot_latest.json (default: snapshot_dir from config)")
+	snapshotDir := fs.String("snapshot-dir", "", "Directory with snapshot_latest.json (when not using DuckDB)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -276,20 +322,34 @@ func cmdDetectChanges(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir := *snapshotDir
-	if dir == "" {
-		dir = cfg.SnapshotDir
-	}
-	if dir == "" {
-		return fmt.Errorf("detect-changes: set -snapshot-dir or snapshot_dir in config")
-	}
-	prev, err := snapshot.Load(filepath.Join(dir, "snapshot_latest.json"))
+	st, db, err := getStore(cfg)
 	if err != nil {
 		return err
 	}
-	st := store.New(cfg.StorePath)
+	if db != nil {
+		defer db.Close()
+	}
 	if err := st.Load(); err != nil {
 		return err
+	}
+	var prev *snapshot.Snapshot
+	if db != nil {
+		prev, err = db.LoadLatestSnapshot()
+		if err != nil {
+			return fmt.Errorf("load snapshot: %w", err)
+		}
+	} else {
+		dir := *snapshotDir
+		if dir == "" {
+			dir = cfg.SnapshotDir
+		}
+		if dir == "" {
+			return fmt.Errorf("detect-changes: set -snapshot-dir or snapshot_dir in config (or use duckdb_path)")
+		}
+		prev, err = snapshot.Load(filepath.Join(dir, "snapshot_latest.json"))
+		if err != nil {
+			return err
+		}
 	}
 	list := st.ListSeen()
 	cur := make([]snapshot.PatternEnt, len(list))
@@ -315,7 +375,7 @@ func cmdDetectChanges(args []string) error {
 func cmdSuggestRules(args []string) error {
 	fs := flag.NewFlagSet("suggest-rules", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "Config YAML")
-	snapshotDir := fs.String("snapshot-dir", "", "Directory with snapshot_latest.json")
+	snapshotDir := fs.String("snapshot-dir", "", "Directory with snapshot_latest.json (when not using DuckDB)")
 	threshold := fs.Int64("suppress-threshold", suppressCountThreshold, "Suggest suppress for new INFO/DEBUG when count >= this")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -324,20 +384,34 @@ func cmdSuggestRules(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir := *snapshotDir
-	if dir == "" {
-		dir = cfg.SnapshotDir
-	}
-	if dir == "" {
-		return fmt.Errorf("suggest-rules: set -snapshot-dir or snapshot_dir in config")
-	}
-	prev, err := snapshot.Load(filepath.Join(dir, "snapshot_latest.json"))
+	st, db, err := getStore(cfg)
 	if err != nil {
 		return err
 	}
-	st := store.New(cfg.StorePath)
+	if db != nil {
+		defer db.Close()
+	}
 	if err := st.Load(); err != nil {
 		return err
+	}
+	var prev *snapshot.Snapshot
+	if db != nil {
+		prev, err = db.LoadLatestSnapshot()
+		if err != nil {
+			return fmt.Errorf("load snapshot: %w", err)
+		}
+	} else {
+		dir := *snapshotDir
+		if dir == "" {
+			dir = cfg.SnapshotDir
+		}
+		if dir == "" {
+			return fmt.Errorf("suggest-rules: set -snapshot-dir or snapshot_dir in config (or use duckdb_path)")
+		}
+		prev, err = snapshot.Load(filepath.Join(dir, "snapshot_latest.json"))
+		if err != nil {
+			return err
+		}
 	}
 	list := st.ListSeen()
 	cur := make([]snapshot.PatternEnt, len(list))
@@ -371,17 +445,21 @@ func cmdApplyRule(args []string) error {
 	if err != nil {
 		return err
 	}
-	st := store.New(cfg.StorePath)
+	st, db, err := getStore(cfg)
+	if err != nil {
+		return err
+	}
+	if db != nil {
+		defer db.Close()
+	}
 	if err := st.Load(); err != nil {
 		return err
 	}
 	switch action {
 	case "suppress":
 		st.Suppress(hash, *reason)
-		if cfg.StorePath != "" {
-			if err := st.Save(); err != nil {
-				return err
-			}
+		if err := st.Save(); err != nil {
+			return err
 		}
 		fmt.Println("Suppressed", hash)
 		if *createSilence && cfg.AlertmanagerURL != "" {
@@ -434,7 +512,7 @@ func truncate(s string, max int) string {
 	return s[:max] + "..."
 }
 
-func printSummary(st *store.Store) {
+func printSummary(st store.PatternStore) {
 	list := st.ListSeen()
 	if len(list) == 0 {
 		return
