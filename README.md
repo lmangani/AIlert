@@ -104,6 +104,10 @@ internal/
   types/             Record, Level
 ```
 
+## PicoClaw integration
+
+Use PicoClaw as the **agent for all LLM-related tasks** (suppress vs notify, summarize changes, apply rules). No PicoClaw code changes: the agent runs the `ailert` CLI via the **exec** tool. See **[docs/picoclaw/README.md](docs/picoclaw/README.md)** for setup; copy the workspace skill and optional TOOLS/HEARTBEAT/AGENTS snippets from `docs/picoclaw/`.
+
 ## Roadmap
 
-Planned: LLM-based suppress vs notify, PicoClaw integration and training/rule-definition SKILLs.
+Planned: optional native PicoClaw tool (if accepted upstream). Current: exec-based integration and alerting skill.
