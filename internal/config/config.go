@@ -6,11 +6,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the root configuration for ailert run.
+// Config is the root configuration for ailert.
 type Config struct {
-	StorePath       string       `yaml:"store_path"`        // optional; load/save pattern store
-	AlertmanagerURL string       `yaml:"alertmanager_url"`   // optional; when set, emit alerts to Alertmanager
-	Sources         []SourceSpec `yaml:"sources"`
+	StorePath        string       `yaml:"store_path"`         // optional; load/save pattern store
+	AlertmanagerURL  string       `yaml:"alertmanager_url"`    // optional; emit alerts / create silences
+	SnapshotDir      string       `yaml:"snapshot_dir"`       // optional; directory for snapshots (change detection)
+	Sources          []SourceSpec `yaml:"sources"`
 }
 
 // SourceSpec describes one data source (file, prometheus, etc.).
