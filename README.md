@@ -1,128 +1,127 @@
 # AIlert
 
-Log-based alerting that tells you when **something important** shows up: automatic pattern discovery, new vs. known, with optional LLM and one-click suppression. See [docs/PLAN.md](docs/PLAN.md) for architecture and roadmap.
+Most log alerting forces you to write queries and thresholds. You either miss real issues or drown in noise. AIlert takes a different approach: it discovers patterns in your log stream, tracks what it has seen before, and surfaces **new** patterns so you notice when something actually changes. No query to write—just point it at a file, URL, or Prometheus metrics and run.
 
-**AIlert works standalone.** All core features (run, suppress, detect-changes, suggest-rules, apply-rule, Alertmanager, metrics) work without any agent or LLM. PicoClaw is an **optional** add-on for users who want an LLM to decide suppress vs notify and to drive periodic or on-request workflows.
+You can run it standalone (no LLM, no agent). Optional: [PicoClaw](https://github.com/sipeed/picoclaw) for LLM-driven “suppress vs notify” and [DuckDB](https://duckdb.org/) for storing state and querying it back as a datasource. See [docs/PLAN.md](docs/PLAN.md) for the full picture.
 
-## Features
+---
 
-- **Pattern engine** — Extracts log templates (variable parts stripped), deduplicates by hash, and classifies each line as **new** (first time) or **known**. Level detection (ERROR, WARN, INFO, DEBUG) from content.
-- **Data sources** — **File**: read log files line-by-line. **Prometheus**: scrape `/metrics`, each line as a record. **HTTP**: GET a URL, each line as a record. **DuckDB**: run a SQL query (e.g. against a `records` table) to stream records. Storage and datasource are separate features; they just share the same DuckDB components when both are used.
-- **Pattern store** — In-memory seen patterns and counts; optional JSON persist, or **DuckDB** for patterns, suppressions, records, and snapshots in one file.
-- **CLI** — Subcommands: `run`, `suppress`, `detect-changes`, `suggest-rules`, `apply-rule`.
-- **Alertmanager** — Emit alerts (POST `/api/v2/alerts`). One-click suppress creates a silence (POST `/api/v2/silences`) so suppressions appear in Grafana/AM UI.
-- **Change detection** — Save snapshots after a run; compare current store to last snapshot (new/gone/count changes).
-- **Rule suggestions** — Heuristic suggestions from changes (e.g. new ERROR → alert; new INFO with high count → suppress). No LLM required.
-- **Metrics** — Optional Prometheus metrics server (records processed, new/known/suppressed, alerts emitted).
+## What you see
 
-## Build and run
+Point AIlert at a log file and run. It turns each line into a pattern (template + hash), deduplicates by that hash, and labels each occurrence as **new** (first time) or **known**:
 
 ```bash
 go build -o ailert ./cmd/ailert
+
+# sample log
+echo 'ERROR connection refused to 10.0.0.1:5432' >> /tmp/app.log
+echo 'WARN timeout after 30s' >> /tmp/app.log
+echo 'ERROR connection refused to 10.0.0.2:5432' >> /tmp/app.log
 ```
 
-## Commands
-
-- **`ailert run`** — Stream sources, detect patterns, print new/known, optionally emit to Alertmanager.
-  - `-config` path to config (default `config.yaml`)
-  - `-save-snapshot` directory to write `snapshot_latest.json` after run (for detect-changes)
-  - `-metrics-addr` e.g. `:9090` to serve Prometheus metrics
-- **`ailert suppress`** — Add suppression by hash or pattern sample; optionally create Alertmanager silence.
-  - `-hash` pattern hash, or `-pattern` "sample log line" (hash computed)
-  - `-reason` reason (default `one-click`)
-  - `-create-silence` create silence in Alertmanager (requires `alertmanager_url` in config)
-- **`ailert detect-changes`** — Compare current store to last snapshot; print new/gone/count deltas.
-  - `-snapshot-dir` or set `snapshot_dir` in config
-- **`ailert suggest-rules`** — From current store vs last snapshot, print heuristic rule suggestions (suppress/alert).
-  - `-suppress-threshold` suggest suppress for new INFO/DEBUG when count >= N (default 5)
-- **`ailert apply-rule suppress <hash>`** — Apply suppression (store + optional AM silence).
-- **`ailert apply-rule alert <hash>`** — Send one alert to Alertmanager for that pattern.
-
-## Config example
+Config (`config.yaml`):
 
 ```yaml
 store_path: ".ailert/store.json"
-# duckdb_path: ".ailert/ailert.duckdb"   # optional: use DuckDB for store, records, snapshots
-# alertmanager_url: "http://localhost:9093"
-# snapshot_dir: ".ailert/snapshots"
-
 sources:
-  - id: app-log
+  - id: app
     type: file
-    path: /var/log/app.log
-  # type: prometheus; url: http://localhost:9090/metrics
-  # type: http; url: https://example.com/logs.txt
-  # type: duckdb; query: "SELECT * FROM records ORDER BY timestamp"  # optional; uses same DB as duckdb_path if set
+    path: /tmp/app.log
 ```
 
-## Example workflow
+```bash
+./ailert run -config config.yaml
+```
+
+Example output:
+
+```
+[ERROR] new f03a7e9d... (count=1) ERROR connection refused to 10.0.0.1:5432
+[WARN]  new 1f214d10... (count=1) WARN timeout after 30s
+[ERROR] known f03a7e9d... (count=2) ERROR connection refused to 10.0.0.2:5432
+```
+
+The two ERROR lines share the same pattern (only the IP/port differ), so the second one is **known**. The WARN is **new**. Next run, all three would be known unless a new pattern appears.
+
+---
+
+## How it works
+
+Each log line is normalized into a **template** (variable bits like numbers, UUIDs, IPs are stripped), then hashed. The engine keeps a store of (level, hash) with a sample and count. If the hash is in the store, the line is **known**; otherwise **new**. Levels (ERROR, WARN, INFO, DEBUG) are inferred from the message if not provided. You can **suppress** a pattern by hash or by a sample line so it no longer counts as alertable; optionally that suppression is mirrored as an Alertmanager silence so it shows up in Grafana.
+
+Data can come from a **file**, an **HTTP** URL (GET, line-by-line), **Prometheus** `/metrics` (each line as a record), or a **DuckDB** query. State can live in a JSON file or in DuckDB (patterns, suppressions, an append-only `records` table, and snapshots for change detection).
+
+---
+
+## Typical workflow
+
+Run once and save a snapshot so you can compare later:
 
 ```bash
-# Run once, save snapshot
 ./ailert run -config config.yaml -save-snapshot .ailert/snapshots
-
-# Later: see what changed
-./ailert detect-changes -config config.yaml -snapshot-dir .ailert/snapshots
-
-# Get rule suggestions (no LLM)
-./ailert suggest-rules -config config.yaml -snapshot-dir .ailert/snapshots
-
-# One-click suppress a pattern and create Alertmanager silence
-./ailert suppress -config config.yaml -pattern "WARN noisy message 123" -create-silence
 ```
 
-## Tests and CI
+Later, see what changed (new patterns, gone patterns, count deltas):
 
 ```bash
-go test ./...
+./ailert detect-changes -config config.yaml -snapshot-dir .ailert/snapshots
 ```
 
-CI: unit tests, integration tests (file, Prometheus, HTTP sources; simulated datasets), build, Alertmanager integration test.
+Get heuristic suggestions (e.g. new ERROR → alert, new INFO with high count → consider suppress):
 
-## Testing with Alertmanager locally
+```bash
+./ailert suggest-rules -config config.yaml -snapshot-dir .ailert/snapshots
+```
+
+Suppress a noisy pattern and, if you use Alertmanager, create a silence in one go:
+
+```bash
+./ailert suppress -config config.yaml -pattern "WARN timeout after 30s" -reason "expected" -create-silence
+```
+
+Other commands: `apply-rule suppress <hash>` / `apply-rule alert <hash>`, and `-metrics-addr :9090` on `run` to expose Prometheus metrics.
+
+---
+
+## Alertmanager
+
+Set `alertmanager_url` in config and AIlert will POST new (non-suppressed) patterns as alerts to Alertmanager. Grafana Alerting uses the same API, so you don’t need a custom UI. With `-create-silence`, suppressions are turned into silences so they appear in the AM/Grafana UI.
+
+Quick local check:
 
 ```bash
 printf 'route:\n  receiver: default\nreceivers:\n  - name: default\n' > /tmp/am.yml
 docker run -d --name am -p 9093:9093 -v /tmp/am.yml:/etc/am.yml prom/alertmanager:latest --config.file=/etc/am.yml
-
+# in config.yaml set alertmanager_url: "http://localhost:9093"
 ./ailert run -config config.yaml
 curl -s http://localhost:9093/api/v2/alerts | jq .
 ```
 
-## Project layout
-
-```
-cmd/ailert/          CLI (run, suppress, detect-changes, suggest-rules, apply-rule)
-internal/
-  alertmanager/     Alertmanager API v2 (alerts, silences)
-  changes/          Change detection and heuristic rule suggestions
-  config/           YAML config
-  duckdb/            DuckDB backend (store, records, snapshots) and DuckDB source type; same components, independent features
-  engine/           Pattern engine (hash, new/known)
-  metrics/          Optional Prometheus metrics
-  integration/       Pipeline tests
-  pattern/          Template extraction, level detection
-  snapshot/         Snapshot save/load (file or DuckDB)
-  source/           File, Prometheus, HTTP, DuckDB sources
-  store/            Seen patterns and suppression store (memory + JSON or DuckDB)
-  testutil/         Test helpers (MetricsServer, datasets)
-  types/            Record, Level
-```
+---
 
 ## DuckDB (optional)
 
-DuckDB is used in two independent ways; they share the same components but are not tied to each other.
+Two separate uses, same components:
 
-1. **Storage** — Set **`duckdb_path`** in config to use DuckDB for state: patterns, suppressions, **records** (append-only log of ingested lines), and snapshots. With storage enabled: **run** appends each record to the `records` table and saves a snapshot in the DB (no `-save-snapshot` dir needed); **detect-changes** and **suggest-rules** use the latest snapshot from the DB (no `snapshot_dir` needed).
+- **Storage** — Set `duckdb_path` in config. Patterns, suppressions, an append-only `records` table, and snapshots live in one DuckDB file. `run` writes records and a snapshot; `detect-changes` and `suggest-rules` use the latest snapshot from the DB (no `snapshot_dir`).
+- **Datasource** — Add a source `type: duckdb` with an optional `query` to stream rows (e.g. from `records`) into the pipeline. Often the same DB as `duckdb_path`, but storage and datasource are independent.
 
-2. **Datasource** — Add a source **`type: duckdb`** with an optional **`query`** to stream records from a DuckDB database (e.g. `SELECT * FROM records ORDER BY timestamp`). Often you use the same DB as `duckdb_path`, but the two features are separate.
+Requires CGO. See `config.example.yaml` for a `duckdb_path` and `type: duckdb` source.
 
-Build requires CGO (DuckDB embeds a native library). See `config.example.yaml` for examples.
+---
 
-## Optional: PicoClaw integration
+## PicoClaw (optional)
 
-If you want an LLM agent to decide **suppress vs notify**, summarize changes, or run periodic checks, you can use [PicoClaw](https://github.com/sipeed/picoclaw). The agent runs the `ailert` CLI via **exec**; no PicoClaw code changes. Setup and workspace files: **[docs/picoclaw/README.md](docs/picoclaw/README.md)**. This is optional — basic features work regardless.
+For LLM-based “should we suppress or notify?” and periodic review, you can wire [PicoClaw](https://github.com/sipeed/picoclaw) to run the `ailert` CLI via its **exec** tool. No code changes in PicoClaw—just workspace files (skill, TOOLS/HEARTBEAT snippets). [docs/picoclaw/README.md](docs/picoclaw/README.md) has the setup. Everything above works without it.
 
-## Roadmap
+---
 
-Planned: optional native PicoClaw tool (if accepted upstream). Current: exec-based integration and alerting skill.
+## Reference
+
+**Commands:** `run`, `suppress`, `detect-changes`, `suggest-rules`, `apply-rule`. Run `./ailert` with no args for the list; `./ailert run -h` (and same for others) for flags.
+
+**Config:** `store_path` (JSON) or `duckdb_path` (DuckDB), `alertmanager_url`, `snapshot_dir` (for file snapshots when not using DuckDB). Under `sources`: `type` + `path` (file), `url` (http/prometheus), or `query` (duckdb). Full example: [config.example.yaml](config.example.yaml).
+
+**Tests:** `go test ./...`. CI runs tests, DuckDB unit/integration and E2E, and Alertmanager integration.
+
+**Layout:** `cmd/ailert` (CLI), `internal/` — `engine`, `pattern`, `store`, `snapshot`, `changes`, `source` (file, http, prometheus, duckdb), `alertmanager`, `duckdb`, `config`, `metrics`, `types`. See [docs/PLAN.md](docs/PLAN.md) for architecture.
