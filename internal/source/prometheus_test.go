@@ -63,3 +63,16 @@ func TestPrometheusSource_ID(t *testing.T) {
 		t.Errorf("ID() = %q", got)
 	}
 }
+
+func TestPrometheusSource_BadURL(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	src := &PrometheusSource{URL: "http://127.0.0.1:0/metrics", SourceID: "bad"}
+	recCh, errCh := src.Stream(ctx)
+	for range recCh {
+	}
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected connection error")
+	}
+}

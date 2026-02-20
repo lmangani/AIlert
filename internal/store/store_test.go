@@ -74,3 +74,55 @@ func TestStoreListSeen_MultipleLevels(t *testing.T) {
 		t.Errorf("ListSeen by level: %v", byLevel)
 	}
 }
+
+func TestStore_Load_NonExistentFile(t *testing.T) {
+	st := New(filepath.Join(t.TempDir(), "does_not_exist.json"))
+	if err := st.Load(); err != nil {
+		t.Errorf("Load of non-existent file should return nil, got %v", err)
+	}
+}
+
+func TestStore_Load_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	st := New(path)
+	if err := st.Load(); err == nil {
+		t.Error("Load of invalid JSON should return error")
+	}
+}
+
+func TestStore_Save_NoPath(t *testing.T) {
+	st := New("")
+	st.Seen(types.LevelError, "h1", "s1")
+	if err := st.Save(); err != nil {
+		t.Errorf("Save with no path should be no-op, got %v", err)
+	}
+}
+
+func TestStore_Save_BadPath(t *testing.T) {
+	// Use a path where parent is a file (can't mkdir)
+	dir := t.TempDir()
+	// Make a file where a directory would need to be
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	st := New(filepath.Join(blocker, "subdir", "store.json"))
+	st.Seen(types.LevelError, "h1", "s1")
+	if err := st.Save(); err == nil {
+		t.Error("Save to bad path should return error")
+	}
+}
+
+func TestStore_Seen_UpdatesSample(t *testing.T) {
+	st := New("")
+	st.Seen(types.LevelError, "h1", "")
+	// second call with non-empty sample should keep original empty sample but update count
+	st.Seen(types.LevelError, "h1", "new sample")
+	if c := st.GetCount(types.LevelError, "h1"); c != 2 {
+		t.Errorf("count = %d, want 2", c)
+	}
+}

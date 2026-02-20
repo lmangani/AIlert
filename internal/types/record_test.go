@@ -26,7 +26,19 @@ func TestParseLevel(t *testing.T) {
 }
 
 func TestLevelString(t *testing.T) {
-	if LevelError.String() != "ERROR" {
-		t.Errorf("LevelError.String() = %s", LevelError.String())
+	tests := []struct {
+		level Level
+		want  string
+	}{
+		{LevelError, "ERROR"},
+		{LevelWarn, "WARN"},
+		{LevelInfo, "INFO"},
+		{LevelDebug, "DEBUG"},
+		{LevelUnknown, "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		if got := tt.level.String(); got != tt.want {
+			t.Errorf("Level(%d).String() = %q, want %q", tt.level, got, tt.want)
+		}
 	}
 }

@@ -44,6 +44,29 @@ func TestWeakEqual(t *testing.T) {
 	if p1.WeakEqual(p3) {
 		t.Error("WeakEqual should be false for different templates")
 	}
+	// Different lengths should be false
+	p4 := New("ERROR connection from server one extra")
+	if p1.WeakEqual(p4) {
+		t.Error("WeakEqual should be false for different word counts")
+	}
+}
+
+func TestNew_QuotedAndParens(t *testing.T) {
+	// Parentheses are stripped like brackets
+	p := New("ERROR (internal detail) failed")
+	if p.Hash() == "" {
+		t.Error("Hash should be set with parens content")
+	}
+	// Curly braces stripped
+	p2 := New(`ERROR {key=value} occurred`)
+	if p2.Hash() == "" {
+		t.Error("Hash should be set with curly brace content")
+	}
+	// Escaped quote inside string
+	p3 := New(`ERROR msg "escaped \" quote" done`)
+	if p3.Hash() == "" {
+		t.Error("Hash should be set for escaped-quote line")
+	}
 }
 
 func TestNew_EmptyLine(t *testing.T) {
