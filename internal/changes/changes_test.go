@@ -69,3 +69,63 @@ func TestSuggestRules(t *testing.T) {
 		t.Errorf("expected 1 suppress suggestion (INFO count 10 >= 5), got %d", suppress)
 	}
 }
+
+func TestSuggestRules_Warn(t *testing.T) {
+	ch := &Changes{
+		NewPatterns: []PatternDelta{
+			{Level: types.LevelWarn, Hash: "w1", Sample: "warn msg", Count: 1},
+		},
+	}
+	rules := SuggestRules(ch, 5)
+	if len(rules) != 1 || rules[0].Action != "alert" {
+		t.Errorf("WARN new pattern should produce alert suggestion: %+v", rules)
+	}
+}
+
+func TestSuggestRules_DebugBelowThreshold(t *testing.T) {
+	ch := &Changes{
+		NewPatterns: []PatternDelta{
+			{Level: types.LevelDebug, Hash: "d1", Sample: "debug msg", Count: 2},
+		},
+	}
+	rules := SuggestRules(ch, 5)
+	if len(rules) != 0 {
+		t.Errorf("DEBUG below threshold should produce no suggestion, got %+v", rules)
+	}
+}
+
+func TestSuggestRules_UnknownLevel(t *testing.T) {
+	ch := &Changes{
+		NewPatterns: []PatternDelta{
+			{Level: types.LevelUnknown, Hash: "u1", Sample: "metric line", Count: 1},
+		},
+	}
+	rules := SuggestRules(ch, 5)
+	if len(rules) != 0 {
+		t.Errorf("UNKNOWN level new pattern should produce no suggestion, got %+v", rules)
+	}
+}
+
+func TestSuggestRules_CountSpike(t *testing.T) {
+	ch := &Changes{
+		CountDeltas: []CountDelta{
+			{Level: types.LevelError, Hash: "e1", Sample: "err", OldCount: 4, NewCount: 20},
+		},
+	}
+	rules := SuggestRules(ch, 5)
+	if len(rules) != 1 || rules[0].Action != "alert" || rules[0].Hash != "e1" {
+		t.Errorf("count spike should produce alert suggestion: %+v", rules)
+	}
+}
+
+func TestSuggestRules_CountNoSpike(t *testing.T) {
+	ch := &Changes{
+		CountDeltas: []CountDelta{
+			{Level: types.LevelError, Hash: "e1", Sample: "err", OldCount: 10, NewCount: 11},
+		},
+	}
+	rules := SuggestRules(ch, 5)
+	if len(rules) != 0 {
+		t.Errorf("small count delta should produce no suggestion, got %+v", rules)
+	}
+}

@@ -104,3 +104,30 @@ func TestFileSource_SkipsEmptyLines(t *testing.T) {
 		t.Fatalf("expected 3 non-empty lines, got %d: %v", len(recs), recs)
 	}
 }
+
+func TestFileSource_TailMode(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "tail.log")
+	lines := []string{"ERROR tail line"}
+	if err := testutil.WriteLogLines(logPath, lines); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	src := &FileSource{Path: logPath, SourceID: "tail-test", Tail: true}
+	recCh, errCh := src.Stream(ctx)
+	var recs []string
+	for rec := range recCh {
+		recs = append(recs, rec.Message)
+	}
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatal(err)
+		}
+	default:
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record in tail mode, got %d", len(recs))
+	}
+}

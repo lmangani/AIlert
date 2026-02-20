@@ -1,7 +1,6 @@
 package pattern
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/ailert/ailert/internal/types"
@@ -23,21 +22,5 @@ func DetectLevel(line string) types.Level {
 	if strings.Contains(lower, "info") {
 		return types.LevelInfo
 	}
-	// Common prefixes
-	if levelPrefix.MatchString(line) {
-		switch line[0] {
-		case 'E', 'e':
-			return types.LevelError
-		case 'W', 'w':
-			return types.LevelWarn
-		case 'I', 'i':
-			return types.LevelInfo
-		case 'D', 'd':
-			return types.LevelDebug
-		}
-	}
 	return types.LevelUnknown
 }
-
-// levelPrefix matches lines like "ERROR ", "WARN [", "INFO  " etc.
-var levelPrefix = regexp.MustCompile(`(?i)^(ERROR|WARN|WARNING|INFO|DEBUG)\s+`)

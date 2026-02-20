@@ -66,4 +66,29 @@ func TestSaveCreatesDir(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Error("Load of invalid JSON should return error")
+	}
+}
+
+func TestSave_BadPath(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(blocker, "sub", "snap.json")
+	ents := []PatternEnt{{Level: types.LevelError, Hash: "h1", Count: 1}}
+	if err := Save(path, ents); err == nil {
+		t.Error("Save to bad path should return error")
+	}
+}
+
 var _ = time.Time{} // use time in tests if needed

@@ -3,6 +3,7 @@ package duckdb
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ailert/ailert/internal/snapshot"
 	"github.com/ailert/ailert/internal/types"
@@ -81,18 +82,9 @@ func TestSnapshot_SaveLoad(t *testing.T) {
 	}
 	defer db.Close()
 
-	ents := []struct {
-		Level  types.Level
-		Hash   string
-		Sample string
-		Count  int64
-	}{
-		{types.LevelError, "e1", "err", 1},
-		{types.LevelInfo, "i1", "info", 5},
-	}
-	patternEnts := make([]snapshot.PatternEnt, len(ents))
-	for i, e := range ents {
-		patternEnts[i] = snapshot.PatternEnt{Level: e.Level, Hash: e.Hash, Sample: e.Sample, Count: e.Count}
+	patternEnts := []snapshot.PatternEnt{
+		{Level: types.LevelError, Hash: "e1", Sample: "err", Count: 1},
+		{Level: types.LevelInfo, Hash: "i1", Sample: "info", Count: 5},
 	}
 	id, err := db.SaveSnapshot(patternEnts)
 	if err != nil {
@@ -111,5 +103,75 @@ func TestSnapshot_SaveLoad(t *testing.T) {
 	if len(snap.Patterns) != 2 {
 		t.Fatalf("expected 2 patterns, got %d", len(snap.Patterns))
 	}
-	_ = id
+}
+
+func TestSnapshot_LoadLatest_Empty(t *testing.T) {
+	db, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	snap, err := db.LoadLatestSnapshot()
+	if err != nil {
+		t.Fatalf("LoadLatestSnapshot on empty DB: %v", err)
+	}
+	if snap != nil {
+		t.Error("expected nil snapshot on empty DB")
+	}
+}
+
+func TestStore_SaveLoad_NoOp(t *testing.T) {
+	db, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	st := NewStore(db)
+	if err := st.Load(); err != nil {
+		t.Errorf("Load should be no-op, got %v", err)
+	}
+	if err := st.Save(); err != nil {
+		t.Errorf("Save should be no-op, got %v", err)
+	}
+}
+
+func TestDB_SQL(t *testing.T) {
+	db, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if db.SQL() == nil {
+		t.Error("SQL() should return non-nil *sql.DB")
+	}
+}
+
+func TestDB_AppendRecord(t *testing.T) {
+	db, err := Open("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	rec := &types.Record{
+		Timestamp: time.Now(),
+		Level:     types.LevelError,
+		Message:   "test error message",
+		Labels:    map[string]string{"env": "test"},
+		SourceID:  "test-source",
+	}
+	if err := db.AppendRecord(rec); err != nil {
+		t.Errorf("AppendRecord: %v", err)
+	}
+
+	// Record with no labels
+	rec2 := &types.Record{
+		Timestamp: time.Now(),
+		Level:     types.LevelInfo,
+		Message:   "info line",
+		SourceID:  "test-source",
+	}
+	if err := db.AppendRecord(rec2); err != nil {
+		t.Errorf("AppendRecord (no labels): %v", err)
+	}
 }

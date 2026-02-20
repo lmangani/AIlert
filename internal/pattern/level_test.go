@@ -25,6 +25,8 @@ func TestDetectLevel(t *testing.T) {
 		{"  WARN  trailing", types.LevelWarn},
 		{"", types.LevelUnknown},
 		{"200 OK", types.LevelUnknown},
+		{"WARNING disk space low", types.LevelWarn},
+		{"ERROR  leading double space", types.LevelError},
 	}
 	for _, tt := range tests {
 		got := DetectLevel(tt.line)
